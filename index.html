@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Connie's Read Aloud</title>
+
+  <!-- Extra libraries for reading PDF, Word, and Excel files -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: palevioletred;
+      color: #222;
+    }
+
+    header {
+      background: #1f2937;
+      color: white;
+      padding: 20px;
+      text-align: center;
+    }
+
+    header h1 {
+      margin: 0;
+      font-size: 28px;
+    }
+
+    header p {
+      margin: 8px 0 0;
+      font-size: 15px;
+      color: #d1d5db;
+    }
+
+    .container {
+      max-width: 1000px;
+      margin: 30px auto;
+      padding: 20px;
+    }
+
+    .upload-box {
+      background: white;
+      border: 2px dashed #9ca3af;
+      border-radius: 15px;
+      padding: 30px;
+      text-align: center;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+    }
+
+    .upload-box.dragover {
+      border-color: #2563eb;
+      background: #eff6ff;
+    }
+
+    input[type="file"] {
+      margin-top: 15px;
+      padding: 10px;
+    }
+
+    .info {
+      margin-top: 20px;
+      background: white;
+      padding: 15px;
+      border-radius: 10px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+      display: none;
+    }
+
+    .reader-controls {
+      margin-top: 20px;
+      display: none;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      background: white;
+      padding: 15px;
+      border-radius: 10px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+    }
+
+    button, select {
+      border: none;
+      border-radius: 8px;
+      padding: 10px 14px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    button {
+      background: #2563eb;
+      color: white;
+    }
+
+    button:hover {
+      background: #1d4ed8;
+    }
+
+    button.secondary {
+      background: #374151;
+    }
+
+    button.danger {
+      background: #dc2626;
+    }
+
+    button.success-btn {
+      background: #047857;
+    }
+
+    select {
+      background: #e5e7eb;
+      color: #111827;
+    }
+
+    #output {
+      margin-top: 20px;
+      background: white;
+      padding: 20px;
+      border-radius: 12px;
+      min-height: 350px;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+      overflow: auto;
+      line-height: 1.7;
+      white-space: pre-wrap;
+    }
+
+    iframe {
+      width: 100%;
+      height: 650px;
+      border: none;
+      border-radius: 10px;
+      margin-top: 15px;
+    }
+
+    img, video, audio {
+      max-width: 100%;
+      margin-top: 10px;
+      border-radius: 10px;
+    }
+
+    .error {
+      color: #b91c1c;
+      font-weight: bold;
+    }
+
+    .success {
+      color: #047857;
+      font-weight: bold;
+    }
+
+    .hint {
+      font-size: 14px;
+      color: #4b5563;
+    }
+
+    .loading {
+      color: #92400e;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+<header>
+  <h1>connie's read aloud </h1>
+  <p>Upload a file, extract the text, and let the app read it aloud.</p>
+</header>
+
+<main class="container">
+  <section class="upload-box" id="uploadBox">
+    <h2>Choose or Drop a File</h2>
+    <p class="hint">
+      Supports text files, PDFs, Word .docx files, Excel files, images, audio, and video.
+    </p>
+    <input type="file" id="fileInput" />
+  </section>
+
+  <section class="info" id="fileInfo"></section>
+
+  <section class="reader-controls" id="readerControls">
+    <button class="success-btn" onclick="readAloud()">Read Aloud</button>
+    <button class="secondary" onclick="pauseReading()">Pause</button>
+    <button class="secondary" onclick="resumeReading()">Resume</button>
+    <button class="danger" onclick="stopReading()">Stop</button>
+
+    <select id="voiceSelect"></select>
+    <select id="speedSelect">
+      <option value="0.7">Slow</option>
+      <option value="1" selected>Normal</option>
+      <option value="1.3">Fast</option>
+      <option value="1.6">Very Fast</option>
+    </select>
+  </section>
+
+  <section id="output">
+    <p class="hint">Your readable text will appear here.</p>
+  </section>
+</main>
+
+<script>
+  const fileInput = document.getElementById('fileInput');
+  const uploadBox = document.getElementById('uploadBox');
+  const output = document.getElementById('output');
+  const fileInfo = document.getElementById('fileInfo');
+  const readerControls = document.getElementById('readerControls');
+  const voiceSelect = document.getElementById('voiceSelect');
+  const speedSelect = document.getElementById('speedSelect');
+
+  let currentText = '';
+  let textChunks = [];
+  let currentChunkIndex = 0;
+  let utterance = null;
+  let voices = [];
+
+  const readableTextTypes = [
+    'text/plain',
+    'text/html',
+    'text/css',
+    'text/javascript',
+    'application/javascript',
+    'application/json',
+    'text/csv',
+    'application/xml',
+    'text/xml'
+  ];
+
+  const readableExtensions = [
+    '.txt', '.html', '.htm', '.css', '.js', '.json', '.csv', '.xml',
+    '.md', '.log', '.sql', '.py', '.java', '.cpp', '.c', '.cs', '.php'
+  ];
+
+  if (window.pdfjsLib) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+
+  fileInput.addEventListener('change', function () {
+    const file = fileInput.files[0];
+    if (file) handleFile(file);
+  });
+
+  uploadBox.addEventListener('dragover', function (event) {
+    event.preventDefault();
+    uploadBox.classList.add('dragover');
+  });
+
+  uploadBox.addEventListener('dragleave', function () {
+    uploadBox.classList.remove('dragover');
+  });
+
+  uploadBox.addEventListener('drop', function (event) {
+    event.preventDefault();
+    uploadBox.classList.remove('dragover');
+
+    const file = event.dataTransfer.files[0];
+    if (file) handleFile(file);
+  });
+
+  async function handleFile(file) {
+    stopReading();
+    currentText = '';
+    textChunks = [];
+    currentChunkIndex = 0;
+    output.innerHTML = '<p class="loading">Reading file. Please wait...</p>';
+    readerControls.style.display = 'none';
+
+    const fileName = file.name.toLowerCase();
+    const fileSize = formatFileSize(file.size);
+    const fileType = file.type || 'Unknown file type';
+
+    fileInfo.style.display = 'block';
+    fileInfo.innerHTML = `
+        <strong>File Name:</strong> ${escapeHtml(file.name)}<br>
+        <strong>File Type:</strong> ${escapeHtml(fileType)}<br>
+        <strong>File Size:</strong> ${fileSize}
+      `;
+
+    try {
+      if (isTextFile(file, fileName)) {
+        await readTextFile(file);
+      } else if (file.type === 'application/pdf' || fileName.endsWith('.pdf')) {
+        await readPdfFile(file);
+      } else if (fileName.endsWith('.docx')) {
+        await readWordFile(file);
+      } else if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls') || fileName.endsWith('.csv')) {
+        await readExcelFile(file);
+      } else if (file.type.startsWith('image/')) {
+        displayImage(file);
+      } else if (file.type.startsWith('audio/')) {
+        displayAudio(file);
+      } else if (file.type.startsWith('video/')) {
+        displayVideo(file);
+      } else {
+        showUnsupportedFileMessage(file);
+      }
+    } catch (error) {
+      output.innerHTML = `
+          <p class="error">Sorry, the app could not read this file.</p>
+          <p class="hint">${escapeHtml(error.message)}</p>
+        `;
+    }
+  }
+
+  function isTextFile(file, fileName) {
+    return readableTextTypes.includes(file.type) || readableExtensions.some(ext => fileName.endsWith(ext));
+  }
+
+  function readTextFile(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+
+      reader.onload = function (event) {
+        currentText = event.target.result;
+        showExtractedText('Text file loaded successfully.', currentText);
+        resolve();
+      };
+
+      reader.onerror = function () {
+        reject(new Error('This text file could not be read.'));
+      };
+
+      reader.readAsText(file);
+    });
+  }
+
+  async function readPdfFile(file) {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    let text = '';
+
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+      const page = await pdf.getPage(pageNumber);
+      const content = await page.getTextContent();
+      const pageText = content.items.map(item => item.str).join(' ');
+      text += `\n\nPage ${pageNumber}\n${pageText}`;
+    }
+
+    const fileUrl = URL.createObjectURL(file);
+    currentText = text.trim();
+
+    output.innerHTML = `
+        <p class="success">PDF text extracted successfully. You can now click Read Aloud.</p>
+        <h3>Extracted Text</h3>
+        <div>${escapeHtml(currentText)}</div>
+        <h3>PDF Preview</h3>
+        <iframe src="${fileUrl}"></iframe>
+      `;
+
+    enableReadingIfTextExists();
+  }
+
+  async function readWordFile(file) {
+    const arrayBuffer = await file.arrayBuffer();
+    const result = await mammoth.extractRawText({ arrayBuffer });
+    currentText = result.value.trim();
+    showExtractedText('Word document text extracted successfully.', currentText);
+  }
+
+  async function readExcelFile(file) {
+    const arrayBuffer = await file.arrayBuffer();
+    const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+    let text = '';
+
+    workbook.SheetNames.forEach(sheetName => {
+      const sheet = workbook.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_csv(sheet);
+      text += `\n\nSheet: ${sheetName}\n${rows}`;
+    });
+
+    currentText = text.trim();
+    showExtractedText('Spreadsheet text extracted successfully.', currentText);
+  }
+
+  function displayImage(file) {
+    const fileUrl = URL.createObjectURL(file);
+    currentText = 'Image file loaded. This app can display the image, but it cannot read text from images without OCR support.';
+    output.innerHTML = `
+        <p class="success">Image loaded successfully.</p>
+        <p class="hint">To read text from images, you need OCR support such as Tesseract.js.</p>
+        <img src="${fileUrl}" alt="Uploaded image" />
+      `;
+    readerControls.style.display = 'flex';
+  }
+
+  function displayAudio(file) {
+    const fileUrl = URL.createObjectURL(file);
+    currentText = 'Audio file loaded. Use the audio player below to listen to it.';
+    output.innerHTML = `
+        <p class="success">Audio loaded successfully.</p>
+        <audio controls src="${fileUrl}"></audio>
+      `;
+    readerControls.style.display = 'flex';
+  }
+
+  function displayVideo(file) {
+    const fileUrl = URL.createObjectURL(file);
+    currentText = 'Video file loaded. Use the video player below to watch it.';
+    output.innerHTML = `
+        <p class="success">Video loaded successfully.</p>
+        <video controls src="${fileUrl}"></video>
+      `;
+    readerControls.style.display = 'flex';
+  }
+
+  function showUnsupportedFileMessage(file) {
+    currentText = '';
+    output.innerHTML = `
+        <p class="error">This file type cannot be read aloud yet.</p>
+        <p>
+          This simple browser app can read aloud text, PDF, Word .docx, and Excel files.
+          Some file types need special libraries or a backend server.
+        </p>
+        <p class="hint">
+          PowerPoint files, scanned image documents, and some protected files may not work in plain HTML.
+        </p>
+      `;
+  }
+
+  function showExtractedText(message, text) {
+    if (!text || !text.trim()) {
+      currentText = '';
+      output.innerHTML = `
+          <p class="error">The file opened, but no readable text was found.</p>
+        `;
+      return;
+    }
+
+    output.innerHTML = `
+        <p class="success">${message}</p>
+        <h3>Extracted Text</h3>
+        <div>${escapeHtml(text)}</div>
+      `;
+
+    enableReadingIfTextExists();
+  }
+
+  function enableReadingIfTextExists() {
+    if (currentText.trim()) {
+      readerControls.style.display = 'flex';
+    }
+  }
+
+  function readAloud() {
+    if (!currentText.trim()) {
+      alert('There is no readable text to read aloud.');
+      return;
+    }
+
+    stopReading();
+
+    // Long text must be split because some browsers stop reading very long speech text.
+    textChunks = splitTextIntoChunks(currentText, 1800);
+    currentChunkIndex = 0;
+    speakCurrentChunk();
+  }
+
+  function speakCurrentChunk() {
+    if (currentChunkIndex >= textChunks.length) {
+      return;
+    }
+
+    utterance = new SpeechSynthesisUtterance(textChunks[currentChunkIndex]);
+    utterance.rate = Number(speedSelect.value);
+
+    const selectedVoiceName = voiceSelect.value;
+    const selectedVoice = voices.find(voice => voice.name === selectedVoiceName);
+    if (selectedVoice) {
+      utterance.voice = selectedVoice;
+    }
+
+    utterance.onend = function () {
+      currentChunkIndex++;
+      speakCurrentChunk();
+    };
+
+    speechSynthesis.speak(utterance);
+  }
+
+  function pauseReading() {
+    if (speechSynthesis.speaking) {
+      speechSynthesis.pause();
+    }
+  }
+
+  function resumeReading() {
+    if (speechSynthesis.paused) {
+      speechSynthesis.resume();
+    }
+  }
+
+  function stopReading() {
+    if (speechSynthesis.speaking || speechSynthesis.paused) {
+      speechSynthesis.cancel();
+    }
+  }
+
+  function splitTextIntoChunks(text, maxLength) {
+    const sentences = text.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [text];
+    const chunks = [];
+    let chunk = '';
+
+    sentences.forEach(sentence => {
+      if ((chunk + sentence).length > maxLength) {
+        chunks.push(chunk);
+        chunk = sentence;
+      } else {
+        chunk += sentence;
+      }
+    });
+
+    if (chunk.trim()) {
+      chunks.push(chunk);
+    }
+
+    return chunks;
+  }
+
+  function loadVoices() {
+    voices = speechSynthesis.getVoices();
+    voiceSelect.innerHTML = '';
+
+    voices.forEach(function (voice) {
+      const option = document.createElement('option');
+      option.value = voice.name;
+      option.textContent = `${voice.name} (${voice.lang})`;
+      voiceSelect.appendChild(option);
+    });
+  }
+
+  function formatFileSize(bytes) {
+    if (bytes < 1024) return bytes + ' bytes';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+  }
+
+  function escapeHtml(text) {
+    return String(text)
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#039;');
+  }
+
+  speechSynthesis.onvoiceschanged = loadVoices;
+  loadVoices();
+</script>
+</body>
+</html>
